@@ -7,6 +7,7 @@ use itertools::Itertools;
 
 use super::{
     file_provider::{FilesError, YuckFileProvider},
+    fun_definition::FunDefinition,
     script_var_definition::ScriptVarDefinition,
     var_definition::VarDefinition,
     widget_definition::WidgetDefinition,
@@ -30,6 +31,7 @@ static TOP_LEVEL_DEFINITION_NAMES: &[&str] = &[
     VarDefinition::ELEMENT_NAME,
     ListenScriptVar::ELEMENT_NAME,
     PollScriptVar::ELEMENT_NAME,
+    FunDefinition::ELEMENT_NAME,
     Include::ELEMENT_NAME,
 ];
 
@@ -53,6 +55,7 @@ pub enum TopLevel {
     Include(Include),
     VarDefinition(VarDefinition),
     ScriptVarDefinition(ScriptVarDefinition),
+    FunDefinition(FunDefinition),
     WidgetDefinition(WidgetDefinition),
     WindowDefinition(WindowDefinition),
 }
@@ -63,16 +66,17 @@ impl FromAst for TopLevel {
         let mut iter = e.try_ast_iter()?;
         let (sym_span, element_name) = iter.expect_symbol()?;
         Ok(match element_name.as_str() {
-            x if x == Include::ELEMENT_NAME => Self::Include(Include::from_tail(span, iter)?),
-            x if x == WidgetDefinition::ELEMENT_NAME => Self::WidgetDefinition(WidgetDefinition::from_tail(span, iter)?),
-            x if x == VarDefinition::ELEMENT_NAME => Self::VarDefinition(VarDefinition::from_tail(span, iter)?),
-            x if x == PollScriptVar::ELEMENT_NAME => {
+            Include::ELEMENT_NAME => Self::Include(Include::from_tail(span, iter)?),
+            WidgetDefinition::ELEMENT_NAME => Self::WidgetDefinition(WidgetDefinition::from_tail(span, iter)?),
+            VarDefinition::ELEMENT_NAME => Self::VarDefinition(VarDefinition::from_tail(span, iter)?),
+            PollScriptVar::ELEMENT_NAME => {
                 Self::ScriptVarDefinition(ScriptVarDefinition::Poll(PollScriptVar::from_tail(span, iter)?))
             }
-            x if x == ListenScriptVar::ELEMENT_NAME => {
+            ListenScriptVar::ELEMENT_NAME => {
                 Self::ScriptVarDefinition(ScriptVarDefinition::Listen(ListenScriptVar::from_tail(span, iter)?))
             }
-            x if x == WindowDefinition::ELEMENT_NAME => Self::WindowDefinition(WindowDefinition::from_tail(span, iter)?),
+            WindowDefinition::ELEMENT_NAME => Self::WindowDefinition(WindowDefinition::from_tail(span, iter)?),
+            FunDefinition::ELEMENT_NAME => Self::FunDefinition(FunDefinition::from_tail(span, iter)?),
             x => {
                 return Err(DiagError(gen_diagnostic! {
                     msg = format!("Unknown toplevel declaration `{x}`"),
@@ -90,11 +94,15 @@ pub struct Config {
     pub window_definitions: HashMap<String, WindowDefinition>,
     pub var_definitions: HashMap<VarName, VarDefinition>,
     pub script_vars: HashMap<VarName, ScriptVarDefinition>,
+    pub fun_definitions: HashMap<String, FunDefinition>,
 }
 
 impl Config {
     fn append_toplevel(&mut self, files: &mut impl YuckFileProvider, toplevel: TopLevel) -> DiagResult<()> {
         match toplevel {
+            TopLevel::FunDefinition(x) => {
+                self.fun_definitions.insert(x.name.clone(), x);
+            }
             TopLevel::VarDefinition(x) => {
                 if self.var_definitions.contains_key(&x.name) || self.script_vars.contains_key(&x.name) {
                     return Err(DiagError(gen_diagnostic! {
@@ -143,6 +151,7 @@ impl Config {
             window_definitions: HashMap::new(),
             var_definitions: HashMap::new(),
             script_vars: HashMap::new(),
+            fun_definitions: HashMap::new(),
         };
         for element in elements {
             config.append_toplevel(files, TopLevel::from_ast(element)?)?;

@@ -1,6 +1,8 @@
 pub mod attributes;
 pub mod backend_window_options;
+pub mod data_definition;
 pub mod file_provider;
+pub mod fun_definition;
 pub mod monitor;
 pub mod script_var_definition;
 pub mod toplevel;

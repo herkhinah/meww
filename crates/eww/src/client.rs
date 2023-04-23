@@ -20,6 +20,9 @@ pub fn handle_client_only_action(paths: &EwwPaths, action: ActionClientOnly) -> 
                 .spawn()?
                 .wait()?;
         }
+        ActionClientOnly::Check => {
+            todo!()
+        }
     }
     Ok(())
 }

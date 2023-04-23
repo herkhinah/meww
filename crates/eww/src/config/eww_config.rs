@@ -61,7 +61,7 @@ impl EwwConfig {
             }
         }
 
-        let Config { widget_definitions, window_definitions, mut var_definitions, mut script_vars } = config;
+        let Config { widget_definitions, window_definitions, mut var_definitions, mut script_vars, fun_definitions } = config;
         script_vars.extend(inbuilt::get_inbuilt_vars());
         var_definitions.extend(inbuilt::get_magic_constants(eww_paths));
 

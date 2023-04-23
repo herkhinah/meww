@@ -75,6 +75,10 @@ pub enum ActionClientOnly {
     /// Print and watch the eww logs
     #[command(name = "logs")]
     Logs,
+
+    /// Type check yuck files
+    #[command(name = "check")]
+    Check,
 }
 
 #[derive(Subcommand, Debug, Serialize, Deserialize, PartialEq)]
