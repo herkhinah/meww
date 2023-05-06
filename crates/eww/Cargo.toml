@@ -11,7 +11,7 @@ edition = "2021"
 
 
 [features]
-default = ["x11", "wayland"]
+default = ["wayland"]
 x11 = ["gdkx11", "x11rb"]
 wayland = ["gtk-layer-shell"]
 
