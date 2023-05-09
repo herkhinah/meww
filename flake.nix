@@ -1,76 +1,121 @@
 {
+  description = "my project description";
   inputs = {
-    flake-compat = { url = "github:edolstra/flake-compat"; flake = false; };
-    rust-overlay.url = "github:oxalica/rust-overlay";
-    nixpkgs.url = "github:nixos/nixpkgs/nixpkgs-unstable";
-    rust-overlay.inputs.nixpkgs.follows = "nixpkgs";
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    flake-utils.url = "github:numtide/flake-utils";
+    naersk.url = "github:nix-community/naersk/master";
+    fenix.url = "github:nix-community/fenix";
+    fenix.inputs.nixpkgs.follows = "nixpkgs";
+    gtk4-layer-shell-src.url = "github:wmww/gtk4-layer-shell";
+    gtk4-layer-shell-src.flake = false;
   };
 
-  outputs = { self, nixpkgs, rust-overlay, flake-compat, ... }:
-    let
-      pkgsFor = system: import nixpkgs {
-        inherit system;
+  outputs = { self, nixpkgs, flake-utils, naersk, fenix, gtk4-layer-shell-src }:
+    flake-utils.lib.eachDefaultSystem (system:
+      let
+        gtk4-layer-shell = pkgs.stdenv.mkDerivation {
+          name = "gtk4-layer-shell";
+          version = "1.0";
 
-        overlays = [
-          self.overlays.default
-          rust-overlay.overlays.default
-        ];
-      };
+          src = gtk4-layer-shell-src;
 
-      targetSystems = [ "aarch64-linux" "x86_64-linux" ];
-      mkRustToolchain = pkgs: pkgs.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
-    in
-    {
-      overlays.default = final: prev:
-        let
-          rust = mkRustToolchain final;
+          buildInputs = with pkgs; [
+            meson
+            ninja
+            wayland
+            gtk4
+            gobject-introspection
+            pkg-config
+            vala
+          ];
 
-          rustPlatform = prev.makeRustPlatform {
-            cargo = rust;
-            rustc = rust;
-          };
-        in
-        {
-          eww = (prev.eww.override { inherit rustPlatform; }).overrideAttrs (old: {
-            version = self.rev or "dirty";
-            src = builtins.path { name = "eww"; path = prev.lib.cleanSource ./.; };
-            cargoDeps = rustPlatform.importCargoLock { lockFile = ./Cargo.lock; };
-            patches = [ ];
-          });
+          mesonFlags = [ "-Dintrospection=true" ];
+        };
+        naersk' = pkgs.callPackage naersk { };
 
-          eww-wayland = final.eww.override { withWayland = true; };
+        widgets-rust = naersk'.buildPackage {
+          src = ./widgets/.;
+          copyLibs = true;
+          buildInputs = with pkgs; [
+            gtk4-layer-shell
+            pkg-config
+
+            gtk4
+            pango
+            glib
+            harfbuzz
+            cairo
+            gdk-pixbuf
+            graphene
+            gtk4-layer-shell
+
+            haskell.compiler.ghc927
+          ];
+        };
+        # This overlay adds our project to pkgs
+        widgets = pkgs.haskellPackages.developPackage {
+          root = ./widgets/.;
+          overrides = self: super: { widgets = widgets-rust; };
+          modifier = drv:
+            pkgs.haskell.lib.addBuildTools drv (with pkgs.haskellPackages;
+              [ cabal-install
+                ghcid
+              ]);
         };
 
-      packages = nixpkgs.lib.genAttrs targetSystems (system:
-        let
-          pkgs = pkgsFor system;
-        in
-        (self.overlays.default pkgs pkgs) // {
-          default = self.packages.${system}.eww;
-        }
-      );
+        pkgs = import nixpkgs {
+          inherit system;
+        };
 
-      devShells = nixpkgs.lib.genAttrs targetSystems (system:
-        let
-          pkgs = pkgsFor system;
-          rust = mkRustToolchain pkgs;
-        in
-        {
-          default = pkgs.mkShell {
-            packages = with pkgs; [
-              rust
-              rust-analyzer-unwrapped
-              gcc
-              gtk3
-              gtk-layer-shell
-              pkg-config
-              deno
-              mdbook
-            ];
+        hPkgs = pkgs.haskellPackages;
+        rPkgs = fenix.packages."${system}";
 
-            RUST_SRC_PATH = "${rust}/lib/rustlib/src/rust/library";
-          };
-        }
-      );
-    };
+        myDevTools = [
+          (hPkgs.ghcWithPackages (pkgs: [ 
+            widgets 
+          ] )) # GHC compiler in the desired version (will be available on PATH)
+          hPkgs.ghcid # Continuous terminal Haskell compile checker
+          hPkgs.ormolu # Haskell formatter
+          hPkgs.hlint # Haskell codestyle checker
+          hPkgs.hoogle # Lookup Haskell documentation
+          hPkgs.haskell-language-server # LSP server for editor
+          hPkgs.implicit-hie # auto generate LSP hie.yaml file from cabal
+          hPkgs.retrie # Haskell refactoring tool
+          hPkgs.hpack
+          # hPkgs.cabal-install
+          stack-wrapped
+          pkgs.zlib # External C library needed by some Haskell packages
+
+          rPkgs.rust-analyzer
+          rPkgs.stable.completeToolchain
+        ];
+
+        stack-wrapped = pkgs.symlinkJoin {
+          name = "stack"; # will be available as the usual `stack` in terminal
+          paths = [ pkgs.stack ];
+          buildInputs = [ pkgs.makeWrapper ];
+          postBuild = ''
+            wrapProgram $out/bin/stack \
+              --add-flags "\
+                --no-nix \
+                --system-ghc \
+                --no-install-ghc \
+              "
+          '';
+        };
+      in {
+        packages.default = pkgs.haskellPackages.developPackage {
+          root = ./.;
+          overrides = self: super: { widgets = widgets; };
+        };
+      
+        devShells.default = pkgs.mkShell {
+          buildInputs = myDevTools;
+
+          # Make external Nix c libraries like zlib known to GHC, like
+          # pkgs.haskell.lib.buildStackProject does
+          # https://github.com/NixOS/nixpkgs/blob/d64780ea0e22b5f61cd6012a456869c702a72f20/pkgs/development/haskell-modules/generic-stack-builder.nix#L38
+          # LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath myDevTools;
+        };
+      });
 }

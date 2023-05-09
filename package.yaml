@@ -1,0 +1,21 @@
+name: meww
+version: 0.0.1
+synopsis: feline wacky widget system 
+description: widget scripting system
+maintainer: Shekhinah Memmel <she@khinah.xyz>
+github: herkhinah/meww
+category: Development
+language: GHC2021
+
+dependencies:
+  - base ^>=4.16.4.0
+  - megaparsec >= 9.2
+  - HUnit >= 1.6.2
+  - widgets == 0.1.0
+  
+default-extensions:
+  - DuplicateRecordFields
+
+executable:
+  main: Main.hs
+  source-dirs: app

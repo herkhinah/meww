@@ -1,0 +1,38 @@
+cabal-version: 1.12
+
+-- This file has been generated from package.yaml by hpack version 0.35.2.
+--
+-- see: https://github.com/sol/hpack
+
+name:           meww
+version:        0.0.1
+synopsis:       feline wacky widget system
+description:    widget scripting system
+category:       Development
+homepage:       https://github.com/herkhinah/meww#readme
+bug-reports:    https://github.com/herkhinah/meww/issues
+maintainer:     Shekhinah Memmel <she@khinah.xyz>
+build-type:     Simple
+
+source-repository head
+  type: git
+  location: https://github.com/herkhinah/meww
+
+executable meww
+  main-is: Main.hs
+  other-modules:
+      Check
+      Eval
+      Parser
+      Syntax
+      Paths_meww
+  hs-source-dirs:
+      app
+  default-extensions:
+      ImportQualifiedPost
+  build-depends:
+      HUnit >=1.6.2
+    , base >=4.16.4.0 && <4.17
+    , megaparsec >=9.2
+    , widgets ==0.1.0
+  default-language: Haskell2010
