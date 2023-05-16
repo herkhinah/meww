@@ -8,20 +8,12 @@ import Data.Functor
 import Data.Functor.Identity qualified
 import Data.Void
 import Syntax
-import Syntax.Builtin qualified as B
-import Syntax.Data qualified as D
-import Syntax.Term qualified as T
 import Text.Megaparsec
 import Text.Megaparsec.Char qualified as C
 import Text.Megaparsec.Char.Lexer qualified as L
 
 ws :: Parser ()
 ws = L.space C.space1 (L.skipLineComment "--") (L.skipBlockComment "{-" "-}")
-
-{-
-withPos :: Parser Tm -> Parser Tm
-withPos p = SrcPos <$> getSourcePos <*> p
--}
 
 lexeme = L.lexeme ws
 
@@ -49,10 +41,10 @@ pIdent = do
   guard (isAlpha (head ident) && ident /= "lam")
   pure ident
 
-pStringLit :: Parser String
-pStringLit = char '"' *> takeWhile1P Nothing (/= '"') <* char '"'
+pStringLit :: Parser Literal
+pStringLit = fmap LitString $ char '"' *> takeWhile1P Nothing (/= '"') <* char '"'
 
-pFloatLit :: Parser Float
+pFloatLit :: Parser Literal
 pFloatLit = do
   str <-
     takeWhile1P Nothing isNumber
@@ -60,86 +52,93 @@ pFloatLit = do
       <> takeWhileP
         Nothing
         isNumber
-  pure $ read str
+  pure $ LitFloat $ read str
 
-pAtom :: Parser T.Tm
-pAtom = try (fmap T.PrimOp pPrimOp) <|> try (fmap T.Var pIdent) <|> (try pTm <|> T.Void <$ ws) <* ws
+pVoidLit :: Parser Literal
+pVoidLit = C.string "()" $> LitVoid
 
-pTm :: Parser T.Tm
-pTm =
-  parens $
-    try pLet <|> try pApp <|> pAtom
+pIntLit :: Parser Literal
+pIntLit = fmap (LitInt . read) (takeWhile1P Nothing isNumber) <* ws
 
-pLet :: Parser T.Tm
+pLit = pStringLit <|> try pFloatLit <|> pIntLit <|> pStringLit <|> pVoidLit
+
+pAtom :: Parser Raw
+pAtom = try (fmap RPrimOp pPrimOp) <|> try (fmap RVar pIdent) <|> try (fmap RLiteral pLit) <* ws
+
+pRaw :: Parser Raw
+pRaw = parens $ try pLet <|> try pApp <|> pAtom
+
+pLet :: Parser Raw
 pLet = do
   pKeyword "let"
   defs <- try (fmap pure pDef) <|> parens (many pDef)
   tm <- pAtom
-  pure $ foldr (\(nm, def) tm -> T.Let nm def tm) tm defs
+  pure $ foldr (\(nm, def) tm -> RLet nm def tm) tm defs
   where
-    pDef :: Parser (Name, T.Tm)
+    pDef :: Parser (Name, Raw)
     pDef = parens $ do
       ident <- pIdent
       tm <- pAtom
       pure (ident, tm)
 
-pLam :: Parser T.Tm
+pLam :: Parser Raw
 pLam = parens $ do
   pKeyword "lam"
   args <- fmap pure pIdent <|> parens (some pIdent)
-  T.Lam args <$> pAtom
+  body <- pAtom
+  pure $ foldr (\arg body -> RLam arg body) body args
 
-pPrimOp :: Parser B.PrimOp
+pPrimOp :: Parser PrimOp
 pPrimOp =
-  ( C.string "+" $> B.Plus
-      <|> C.string "-" $> B.Minus
-      <|> C.string "*" $> B.Mult
-      <|> C.string "print" $> B.Print
+  ( C.string "+" $> Plus
+      <|> C.string "-" $> Minus
+      <|> C.string "*" $> Mult
+      <|> C.string "print" $> Print
   )
     <* ws
 
-pApp :: Parser T.Tm
+pApp :: Parser Raw
 pApp = do
   rator <- pAtom
   rand <- some pAtom
-  pure $ T.App rator rand
+  pure $ foldr (\rator rand -> RApp rator rand) rator rand
 
 pFun :: Parser Fun
 pFun = do
   pKeyword "fun"
   name <- pIdent
   args <- pList pIdent
-  body <- pTm
+  body <- pRaw
   pure Syntax.Fun {name = name, args = args, body = body}
 
 pTypevar :: Parser Name
 pTypevar = fmap pure (char '\'') <> pIdent
 
-pData :: Parser D.Data
+pData :: Parser Data
 pData = do
   pKeyword "data"
   name <- pIdent
-  args <- optional $ pList pTypevar
+  args <- fmap concat (optional $ pList pTypevar)
   cons <- many (parens pCons)
-  pure D.Data {name = name, args = args, cons = cons}
+  pure Data {name = name, args = args, cons = cons}
 
-pCons :: Parser D.Cons
+pCons :: Parser Cons
 pCons = do
   name <- pIdent
   args <- many pConsArg
-  pure D.Cons {name = name, args = args}
+  pure Cons {name = name, args = args}
 
-pConsArg :: Parser D.ConsArg
-pConsArg = fmap D.TypeVar pTypevar <|> fmap D.Con pIdent <|> parens (fmap D.App pIdent <*> some pConsArg)
+pConsArg :: Parser ConsArg
+pConsArg = fmap TypeVar pTypevar <|> fmap ConsName pIdent <|> parens (fmap ConsApp pIdent <*> some pConsArg)
 
-pConsArgAtom :: Parser D.ConsArg
-pConsArgAtom = try (fmap D.TypeVar pTypevar) <|> try (fmap D.Con pIdent) <|> pApplied
+pConsArgAtom :: Parser ConsArg
+pConsArgAtom = try (fmap TypeVar pTypevar) <|> try (fmap ConsName pIdent) <|> pApplied
   where
-    pApplied :: Parser D.ConsArg
+    pApplied :: Parser ConsArg
     pApplied = parens $ do
       name <- pIdent
-      args <- many (fmap D.TypeVar pTypevar <|> parens pConsArgAtom <|> fmap D.Con pIdent)
-      pure $ D.App name args
+      args <- many (fmap TypeVar pTypevar <|> parens pConsArgAtom <|> fmap ConsName pIdent)
+      pure $ ConsApp name args
 
 pToplevel :: Parser [Toplevel]
 pToplevel =

@@ -1,37 +1,43 @@
 module Syntax where
 
 import Common (Name)
-import Syntax.Data (Data)
-import Syntax.Term (Tm)
 
-newtype Widget = Widget {children :: Widget} deriving (Show)
+data ConsArg = ConsName Name | TypeVar Name | ConsApp Name [ConsArg] deriving (Show)
 
-data Geometry = Geometry
-  { x :: String,
-    y :: String,
-    width :: String,
-    heigh :: String,
-    anchor :: String
+data Cons = Cons
+  { name :: Name,
+    args :: [ConsArg]
   }
   deriving (Show)
 
-data Window = Window
-  { windowtype :: String,
-    geometry :: Geometry,
-    widget :: Name
+data Data = Data {name :: Name, args :: [Name], cons :: [Cons]} deriving (Show)
+
+data Fun = Fun
+  { name :: Name,
+    args :: [Name],
+    body :: Raw
   }
   deriving (Show)
 
 data Toplevel
   = TopFun Fun
   | TopData Data
-  | TopWindow Window
-  | TopWidget Widget
   deriving (Show)
 
-data Fun = Fun
-  { name :: Name,
-    args :: [Name],
-    body :: Tm
-  }
+data PrimOp
+  = Plus
+  | Minus
+  | Mult
+  | Print
+  deriving (Show)
+
+data Literal = LitFloat Float | LitInt Int | LitBool Bool | LitString String | LitVoid deriving (Show)
+
+data Raw
+  = RLam Name Raw
+  | RApp Raw Raw
+  | RLet Name Raw Raw
+  | RVar Name
+  | RLiteral Literal
+  | RPrimOp PrimOp
   deriving (Show)

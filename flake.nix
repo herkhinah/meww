@@ -8,9 +8,10 @@
     fenix.inputs.nixpkgs.follows = "nixpkgs";
     gtk4-layer-shell-src.url = "github:wmww/gtk4-layer-shell";
     gtk4-layer-shell-src.flake = false;
+    hls-flake.url = "git+https://github.com/haskell/haskell-language-server?tag=1.10.0";
   };
 
-  outputs = { self, nixpkgs, flake-utils, naersk, fenix, gtk4-layer-shell-src }:
+  outputs = { self, nixpkgs, flake-utils, naersk, fenix, gtk4-layer-shell-src, hls-flake }:
     flake-utils.lib.eachDefaultSystem (system:
       let
         gtk4-layer-shell = pkgs.stdenv.mkDerivation {
@@ -49,7 +50,7 @@
             graphene
             gtk4-layer-shell
 
-            haskell.compiler.ghc927
+            haskell.compiler.ghc902
           ];
         };
         # This overlay adds our project to pkgs
@@ -67,24 +68,24 @@
           inherit system;
         };
 
-        hPkgs = pkgs.haskellPackages;
+        hPkgs = pkgs.haskell.packages.ghc902;
         rPkgs = fenix.packages."${system}";
+        hls = hls-flake.packages."${system}".haskell-language-server-902;
 
         myDevTools = [
           (hPkgs.ghcWithPackages (pkgs: [ 
             widgets 
           ] )) # GHC compiler in the desired version (will be available on PATH)
-          hPkgs.ghcid # Continuous terminal Haskell compile checker
-          hPkgs.ormolu # Haskell formatter
           hPkgs.hlint # Haskell codestyle checker
           hPkgs.hoogle # Lookup Haskell documentation
-          hPkgs.haskell-language-server # LSP server for editor
           hPkgs.implicit-hie # auto generate LSP hie.yaml file from cabal
           hPkgs.retrie # Haskell refactoring tool
           hPkgs.hpack
-          # hPkgs.cabal-install
+          pkgs.cabal-install
           stack-wrapped
+          pkgs.ormolu
           pkgs.zlib # External C library needed by some Haskell packages
+          hls
 
           rPkgs.rust-analyzer
           rPkgs.stable.completeToolchain

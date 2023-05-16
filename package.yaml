@@ -8,10 +8,11 @@ category: Development
 language: GHC2021
 
 dependencies:
-  - base ^>=4.16.4.0
-  - megaparsec >= 9.2
-  - HUnit >= 1.6.2
+  - base ^>=4.15
+  - megaparsec >= 9.2.2
   - widgets == 0.1.0
+  - containers >= 0.6
+  - transformers >= 0.5
   
 default-extensions:
   - DuplicateRecordFields
