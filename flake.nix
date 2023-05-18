@@ -14,6 +14,11 @@
   outputs = { self, nixpkgs, flake-utils, naersk, fenix, gtk4-layer-shell-src, hls-flake }:
     flake-utils.lib.eachDefaultSystem (system:
       let
+        pkgs = import nixpkgs {
+          inherit system;
+          config = { allowUnfree = true; };
+        };
+
         gtk4-layer-shell = pkgs.stdenv.mkDerivation {
           name = "gtk4-layer-shell";
           version = "1.0";
@@ -37,6 +42,11 @@
         widgets-rust = naersk'.buildPackage {
           src = ./widgets/.;
           copyLibs = true;
+
+          nativeBuildInputs = [
+            pkgs.ghc
+          ];
+          
           buildInputs = with pkgs; [
             gtk4-layer-shell
             pkg-config
@@ -49,47 +59,28 @@
             gdk-pixbuf
             graphene
             gtk4-layer-shell
-
-            haskell.compiler.ghc902
           ];
         };
-        # This overlay adds our project to pkgs
+
         widgets = pkgs.haskellPackages.developPackage {
           root = ./widgets/.;
           overrides = self: super: { widgets = widgets-rust; };
           modifier = drv:
-            pkgs.haskell.lib.addBuildTools drv (with pkgs.haskellPackages;
+            pkgs.haskell.lib.addBuildTools drv (with pkgs;
               [ cabal-install
                 ghcid
               ]);
         };
 
-        pkgs = import nixpkgs {
-          inherit system;
-        };
-
-        hPkgs = pkgs.haskell.packages.ghc902;
+        hPkgs = pkgs.haskellPackages.extend (self: super: {widgets = widgets;});
         rPkgs = fenix.packages."${system}";
-        hls = hls-flake.packages."${system}".haskell-language-server-902;
 
-        myDevTools = [
-          (hPkgs.ghcWithPackages (pkgs: [ 
-            widgets 
-          ] )) # GHC compiler in the desired version (will be available on PATH)
-          hPkgs.hlint # Haskell codestyle checker
-          hPkgs.hoogle # Lookup Haskell documentation
-          hPkgs.implicit-hie # auto generate LSP hie.yaml file from cabal
-          hPkgs.retrie # Haskell refactoring tool
-          hPkgs.hpack
-          pkgs.cabal-install
-          stack-wrapped
-          pkgs.ormolu
-          pkgs.zlib # External C library needed by some Haskell packages
-          hls
-
-          rPkgs.rust-analyzer
-          rPkgs.stable.completeToolchain
-        ];
+        ghc-wrapped = hPkgs.ghcWithHoogle (hPkgs: with hPkgs; [ 
+          widgets 
+          megaparsec
+          containers
+          transformers
+        ]);
 
         stack-wrapped = pkgs.symlinkJoin {
           name = "stack"; # will be available as the usual `stack` in terminal
@@ -104,6 +95,59 @@
               "
           '';
         };
+
+        rustDevEnv = (with pkgs; [
+          gtk4-layer-shell
+          pkg-config
+
+          gtk4
+          pango
+          glib
+          harfbuzz
+          cairo
+          gdk-pixbuf
+          graphene
+        ]) ++ (with rPkgs; [
+          rust-analyzer
+          stable.completeToolchain
+        ]);
+
+        haskellDevEnv = [
+          ghc-wrapped
+          stack-wrapped
+        ] ++ (with hPkgs; [
+          implicit-hie
+          retrie
+        ]) ++ (with pkgs; [
+          zlib
+          haskell-language-server
+          hlint
+          hpack
+          cabal-install
+          ormolu
+          ocamlPackages.ocaml-lsp
+          ocaml
+        ]);
+
+        vscode = pkgs.vscode-with-extensions.override {
+          vscode = pkgs.vscode.fhsWithPackages (ps: rustDevEnv ++ haskellDevEnv);
+          vscodeExtensions = with pkgs.vscode-extensions; [
+            haskell.haskell
+            justusadam.language-haskell
+            matklad.rust-analyzer
+            ocamllabs.ocaml-platform
+          ] ++ pkgs.vscode-utils.extensionsFromVscodeMarketplace [
+            {
+              name = "hoogle-vscode";
+              publisher = "jcanero";
+              version = "0.0.7";
+              sha256 = "sha256-QU2psApUsSd70Lol6FbQopoT5x/raA5FOgLJsbO7qlk=";
+            }
+          ];
+        };
+
+
+        myDevTools = haskellDevEnv ++ rustDevEnv ++ [vscode];
       in {
         packages.default = pkgs.haskellPackages.developPackage {
           root = ./.;
@@ -112,11 +156,6 @@
       
         devShells.default = pkgs.mkShell {
           buildInputs = myDevTools;
-
-          # Make external Nix c libraries like zlib known to GHC, like
-          # pkgs.haskell.lib.buildStackProject does
-          # https://github.com/NixOS/nixpkgs/blob/d64780ea0e22b5f61cd6012a456869c702a72f20/pkgs/development/haskell-modules/generic-stack-builder.nix#L38
-          # LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath myDevTools;
         };
       });
 }

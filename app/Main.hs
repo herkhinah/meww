@@ -15,6 +15,9 @@ import Foreign
 import Data.STRef
 import Control.Monad.ST.Unsafe
 import Data.IORef
+import qualified Text.Megaparsec
+import Control.Monad.Trans.Except (runExceptT)
+import Control.Monad.Trans.Class
 
 {-
 counter :: ST s CInt -> ST s CInt
@@ -24,7 +27,7 @@ counter x = do
 -}
 
 
-foreign import ccall "wrapper"  
+foreign import ccall "wrapper"
   mkCallback :: (IO CInt) -> IO (FunPtr (IO CInt))
 
 ffiCounter :: IORef CInt -> IO (FunPtr (IO CInt))
@@ -32,20 +35,13 @@ ffiCounter ref = mkCallback $ do
   val <- readIORef ref
   modifyIORef ref (+ 1)
   return val
-  
-  
 
+
+example1 = "(let (map (lam (f m) (if (empty m) nil (cons (f (head m)) (map f (tail m)))))) map)"
 
 main :: IO ()
 main = do
-  counter <- newIORef 0
-  counter <- ffiCounter counter
-  printNum counter
-  printNum counter
-  printNum counter
-  printNum counter
-  run
-  name <- newCString "foobar"
-  createWindow name
-  threadDelay 10000000
+  let Right raw = Text.Megaparsec.parse (parens pLet) "" example1
+  let ty = runST (runExceptT (do cxt <- lift freshCxt; infer cxt raw))
+  putStr (show ty)
   pure ()

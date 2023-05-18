@@ -30,11 +30,15 @@ executable meww
   hs-source-dirs:
       app
   default-extensions:
+      OverloadedRecordDot
       DuplicateRecordFields
+      LambdaCase
+      PatternSynonyms
   build-depends:
-      base ==4.15.*
-    , containers >=0.6
-    , megaparsec >=9.2.2
-    , transformers >=0.5
+      base
+    , containers
+    , ghc
+    , megaparsec
+    , transformers
     , widgets ==0.1.0
   default-language: GHC2021

@@ -8,7 +8,8 @@ import Data.Functor
 import Data.Functor.Identity qualified
 import Data.Void
 import Syntax
-import Text.Megaparsec
+import Text.Megaparsec hiding (parse)
+import qualified Text.Megaparsec (parse)
 import Text.Megaparsec.Char qualified as C
 import Text.Megaparsec.Char.Lexer qualified as L
 
@@ -63,30 +64,30 @@ pIntLit = fmap (LitInt . read) (takeWhile1P Nothing isNumber) <* ws
 pLit = pStringLit <|> try pFloatLit <|> pIntLit <|> pStringLit <|> pVoidLit
 
 pAtom :: Parser Raw
-pAtom = try (fmap RPrimOp pPrimOp) <|> try (fmap RVar pIdent) <|> try (fmap RLiteral pLit) <* ws
-
-pRaw :: Parser Raw
-pRaw = parens $ try pLet <|> try pApp <|> pAtom
+pAtom =
+  parens (try pLet <|> try pLam <|> pApp)
+  <|> try (fmap RVar pIdent)
+  <|> try (fmap RLiteral pLit) <* ws
 
 pLet :: Parser Raw
 pLet = do
   pKeyword "let"
-  defs <- try (fmap pure pDef) <|> parens (many pDef)
+  defs <- parens $ fmap pure pDef <|> some (parens pDef)
   tm <- pAtom
   pure $ foldr (\(nm, def) tm -> RLet nm def tm) tm defs
   where
     pDef :: Parser (Name, Raw)
-    pDef = parens $ do
+    pDef = do
       ident <- pIdent
       tm <- pAtom
       pure (ident, tm)
 
 pLam :: Parser Raw
-pLam = parens $ do
+pLam = do
   pKeyword "lam"
-  args <- fmap pure pIdent <|> parens (some pIdent)
+  args <- parens (some pIdent) <|> fmap pure pIdent
   body <- pAtom
-  pure $ foldr (\arg body -> RLam arg body) body args
+  pure $ foldr RLam body args
 
 pPrimOp :: Parser PrimOp
 pPrimOp =
@@ -101,14 +102,14 @@ pApp :: Parser Raw
 pApp = do
   rator <- pAtom
   rand <- some pAtom
-  pure $ foldr (\rator rand -> RApp rator rand) rator rand
+  pure $ foldl RApp rator rand
 
 pFun :: Parser Fun
 pFun = do
   pKeyword "fun"
   name <- pIdent
   args <- pList pIdent
-  body <- pRaw
+  body <- pAtom
   pure Syntax.Fun {name = name, args = args, body = body}
 
 pTypevar :: Parser Name
@@ -143,3 +144,5 @@ pConsArgAtom = try (fmap TypeVar pTypevar) <|> try (fmap ConsName pIdent) <|> pA
 pToplevel :: Parser [Toplevel]
 pToplevel =
   many $ parens (fmap TopFun pFun <|> fmap TopData pData)
+
+parse = Text.Megaparsec.parse pToplevel ""
