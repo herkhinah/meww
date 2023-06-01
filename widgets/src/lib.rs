@@ -10,6 +10,9 @@ use gtk4::{
 };
 use hs_bindgen::*;
 
+mod types;
+mod parser;
+
 static CHANNEL: OnceCell<Sender<String>> = OnceCell::new();
 
 #[hs_bindgen(run::IO())]

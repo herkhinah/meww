@@ -16,7 +16,7 @@
 
 {-# OPTIONS_GHC -Wno-unused-imports #-}
 
-module Widgets (run, printNum, createWindow) where
+module Widgets (run, printNum, createWindow, run, printNum, createWindow, run, printNum, createWindow) where
 
 import Data.Int
 import Data.Word
