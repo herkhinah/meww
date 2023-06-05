@@ -10,10 +10,12 @@ language: GHC2021
 dependencies:
   - base
   - megaparsec
-  - widgets == 0.1.0
+  # widgets == 0.1.0
   - containers
   - transformers
+  - lens
   - ghc
+  - HUnit
   
 default-extensions:
   - OverloadedRecordDot
@@ -23,4 +25,11 @@ default-extensions:
 
 executable:
   main: Main.hs
-  source-dirs: app
+  source-dirs: 
+    - app
+
+executable:
+  main: Test.hs
+  source-dirs:
+    - app
+    - tests
