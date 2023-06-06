@@ -39,6 +39,7 @@ pIdent :: Parser String
 pIdent = do
   ident <- takeWhile1P Nothing (\c -> not (isSpace c) && c /= '(' && c /= ')' ) <* ws
   guard ('\'' /= head ident
+    && ident /= "_"
     && ident /= "lam"
     && ident /= "case"
     && ident /= "data"
@@ -118,16 +119,15 @@ pCaseExpr :: Parser Raw
 pCaseExpr = do
   pKeyword "case"
   expr <- pAtom
-  cases <- some $ parens pCase
+  cases <- some $ (,) <$> parens pPattern <*> pAtom
   pure $ RCase expr cases
   where
-  pCase :: Parser (Name, [Raw], Raw)
-  pCase = do
-    (nm, args) <- parens (do
-      nm <- pIdent
-      args <- many (pVar <|> pConst)
-      pure (nm, args)) <|> (, []) <$> pIdent
-    (nm, args, ) <$> pAtom
+    pPattern :: Parser Pattern
+    pPattern = PCons <$> pIdent <*> many (pBind <|> pHole)
+      where
+        pBind = PBind <$> pIdent
+        pHole = pKeyword "_" >> pure PHole
+
 
 
 
@@ -153,13 +153,13 @@ pData = do
 pCons :: Parser Cons
 pCons = do
   name <- pIdent
-  args <- many $ parens pConsApp <|> ConsVar <$> pTypevar <|> ConsName <$> pIdent
+  args <- many $ parens pConsApp <|> ConsVar <$> pTypevar
   pure $ Cons name args
 
 pConsApp :: Parser Cons
 pConsApp = do
   nm <- pIdent
-  args <- some $ parens pConsApp <|> ConsVar <$> pTypevar <|> ConsName <$> pIdent
+  args <- some $ parens pConsApp <|> ConsVar <$> pTypevar
   pure $ Cons nm args
 
 

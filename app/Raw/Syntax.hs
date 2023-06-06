@@ -7,7 +7,6 @@ data Cons
   = Cons Name [Cons]
   | ConsApp Name [Cons]
   | ConsVar Name
-  | ConsName Name
   deriving (Show)
 
 
@@ -31,6 +30,11 @@ data PrimOp
   | Print
   deriving (Show)
 
+data Pattern 
+  = PCons Name [Pattern]
+  | PBind Name
+  | PHole  
+
 data Raw
   = RLam [Name] Raw
   | RApp Raw [Raw]
@@ -40,7 +44,7 @@ data Raw
   | RLetTyped [(Name, Raw, Ty)] Raw
   | RVar Name
   | RConst Constant 
-  | RCase Raw [(Name, [Raw], Raw)]
+  | RCase Raw [(Pattern, Raw)]
 
 pattern RBool val = RConst (CBool val)
 pattern RString val = RConst (CString val)

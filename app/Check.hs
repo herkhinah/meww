@@ -1,4 +1,3 @@
-{-# LANGUAGE DisambiguateRecordFields #-}
 
 module Check where
 
@@ -21,16 +20,15 @@ import Control.Monad.Zip
 import Data.Foldable
 import Debug.Trace (trace)
 import Control.Exception
-import Control.Lens hiding (element)
-import Control.Lens.TH
 import qualified Data.Maybe
 import Data.Maybe
-import GHC.Runtime.Eval (Term(ty))
 import Type
 import GHC.Plugins (mapAndUnzip)
-import GHC.Builtin.Names.TH (cxtName)
 import qualified Data.Bifunctor
 import Data.Bifunctor (first)
+import qualified Data.Map.Strict as M
+import Data.Map.Strict ((!?), insert)
+import Data.Semigroup.Foldable (foldlM1)
 
 -- we want don't want to unify the types inside let bounds with types of bounds with deeper level
 data LetLvl = Marked | W | LLvl Int deriving (Show, Eq)
@@ -118,13 +116,113 @@ pattern TInt = TyBuiltin PInt
 
 type Lvl = Int
 
+data Globals = Globals {
+  funs :: M.Map String (Raw, Ty),
+  cons :: M.Map String Ty,
+  types :: M.Map String Ty
+}
 
 data Cxt s = Cxt {
   metas :: STArray s Int (Maybe MetaEntry),
   nextMeta :: STRef s Int,
   env :: [(Name, Ty)],
-  llvl :: LetLvl
+  llvl :: LetLvl,
+  globals :: Globals
 }
+
+
+lookupGlobalTm :: Name -> Globals -> Maybe Ty
+lookupGlobalTm nm g = fmap snd g.funs !? nm <|> g.cons !? nm
+
+lookupGlobalTy :: Name -> Globals -> Maybe Ty
+lookupGlobalTy nm g = g.types !? nm
+
+lookupGlobalCons :: Name -> Globals -> Maybe Ty
+lookupGlobalCons nm g = g.cons !? nm
+
+declareToplevelFuns :: Cxt s -> [Toplevel] -> Result s (Cxt s)
+declareToplevelFuns cxt (TopFun f : defs) = do
+  let nm = f.name
+  args <- lift $ mapM (\_ -> freshMeta cxt) f.args
+  ret <- lift $ freshMeta cxt
+  case lookupGlobalTm nm cxt.globals of
+    Just ty -> except $ Left $ "duplicate definition of " ++ nm
+    Nothing -> pure $ cxt { globals = cxt.globals { funs = M.insert nm (RLam f.args f.body, TyArrow args ret) cxt.globals.funs } }
+declareToplevelFuns cxt (_ : defs) = declareToplevelFuns cxt defs
+declareToplevelFuns cxt [] = pure cxt
+
+declareToplevelData ::  Cxt s -> [Toplevel] -> Result s (Cxt s)
+declareToplevelData cxt (TopData d : defs) = do
+  let nm = d.name
+  (map, ty) <- case d.args of
+            [] -> pure ([], TyData nm [])
+            args -> do
+              (map, bounds, tyvars) <- lift $ mapAndUnzip3M (\nm -> do TyMeta m <- freshMeta cxt; pure ((nm, m), m, TyVar m)) d.args
+              pure ([], TyPoly bounds $ TyData nm tyvars)
+  cxt <- case lookupGlobalTy nm cxt.globals of
+            (Just _) -> except $ Left $ "multiple declarations of " ++ nm
+            Nothing -> declareToplevelData (cxt{ globals = cxt.globals{ types = insert nm ty cxt.globals.types } }) defs
+  cxt <- foldlM (\cxt cons -> inferAndBindCons cxt map ty cons) cxt d.cons
+  declareToplevelData cxt defs
+declareToplevelData cxt (_ : defs) = declareToplevelData cxt defs
+declareToplevelData cxt [] = pure cxt
+
+typecheckToplevelData :: Cxt s -> Result s ()
+typecheckToplevelData cxt = undefined
+{-
+typecheckToplevelFuns :: Cxt s -> Result s (Cxt s)
+typecheckToplevelFuns cxt = do
+  cxt <- M.mapAccumWithKey <$> (\cxt nm (raw, ty) -> (checkFun cxt)) cxt cxt.globals.funs
+  pure $ cxt { globals = cxt.globals { funs = funs } }
+    where
+      checkFun :: Cxt s -> Name -> Raw -> Ty -> Result s (Cxt s, (Raw, Ty))
+      checkFun cxt raw ty = do
+        let cxt = enterLet cxt
+        (raw, ty) <- infer cxt raw
+        let cxt = leaveLet cxt
+        (raw, ) <$> lift $ gen cxt ty
+-}
+
+instance MonadFail (Result s) where
+  fail = pure $ except $ Left "impossible"
+
+
+inferAndBindCons :: Cxt s -> [(Name, MetaVar)] -> Ty -> Cons -> Result s (Cxt s)
+inferAndBindCons cxt typevars ty cons@(Cons nm args) = (\ty -> cxt { globals = cxt.globals { cons = M.insert nm ty cxt.globals.cons } }) <$> inferCons cxt typevars ty cons
+
+inferCons :: Cxt s -> [(Name, MetaVar)] -> Ty -> Cons -> Result s Ty
+inferCons cxt typevars ty (Cons nm args) = do
+  args <- mapM (inferCons cxt typevars ty) args
+  pure $ case ty of
+              TyPoly bds ty -> TyPoly bds (TyArrow args ty)
+              ty -> TyArrow args ty
+
+inferCons cxt typevars ty (ConsApp nm args) = do
+  args <- mapM (inferCons cxt typevars ty) args
+  pure $ TyData nm args
+inferCons cxt typevars ty (ConsVar nm) = do
+  case lookup nm typevars of
+    Just m -> pure $ TyVar m
+    Nothing -> except $ Left $ "unbound typevar " ++ nm
+
+{-
+  let tyData = case lookupGlobalTy d.name cxt.globals of
+                (Just ty) -> ty
+                Nothing -> error "impossible"
+  case tyData of
+    TyPoly args ty -> undefined
+    ty -> undefined
+  undefined
+  where
+    inferCon :: Cxt s -> [(Name, Ty)] -> Cons -> Result s Ty
+    inferCon cxt vars (Cons nm [args]) = undefined
+    inferCon cxt vars (ConsApp nm [args]) = do
+      case lookupGlobalCons cxt nm of
+        Just 
+    inferCon cxt vars (ConsVar nm) = case lookup nm vars of 
+      Just ty -> pure ty
+      Nothing -> except $ Left $ "unbound typevar " ++ nm 
+-}
 
 bind :: Cxt s -> Name  -> Ty -> Cxt s
 bind cxt nm ty = cxt { env = (nm, ty) : cxt.env }
@@ -186,7 +284,7 @@ inst cxt bounds ty = do
   pure $ inst' subst ty
   where
     inst' :: [(MetaVar, Ty)] -> Ty -> Ty
-    inst' subs (TyMeta a) = fromMaybe (TyMeta a) $ lookup a subs
+    inst' subs (TyVar a) = fromMaybe (TyVar a) $ lookup a subs
     inst' subs (TyArrow a b) = TyArrow (fmap (inst' subs) a) (inst' subs b)
     inst' subs (TyData name tys) = TyData name $ map (inst' subs) tys
     inst' subs (TMaybe ty) = TMaybe $ inst' subs ty
@@ -195,7 +293,7 @@ inst cxt bounds ty = do
     inst' subs ty = ty
 
 gen :: Cxt s -> Ty -> ST s Ty
-gen cxt ty | trace ("gen" ++ show ty) False = undefined
+--gen cxt ty | trace ("gen" ++ show ty) False = undefined
 gen cxt ty = do
   ty <- force cxt ty
   (bds, ty) <- gen' cxt ty
@@ -265,43 +363,58 @@ forceTm :: Cxt s -> Raw -> ST s Raw
 forceTm cxt (RLetTyped defs tm) = RLetTyped <$> mapM (\(nm, def, ty) -> (nm, , ) <$> forceTm cxt def <*> force cxt ty) defs <*> forceTm cxt tm
 forceTm cxt (RLetRecTyped defs tm) = RLetRecTyped <$> mapM (\(nm, def, ty) -> (nm, , ) <$> forceTm cxt def <*> force cxt ty) defs <*> forceTm cxt tm
 forceTm cxt (RLam nms tm) = RLam nms <$> forceTm cxt tm
-forceTm cxt (RApp tm args) = RApp <$> forceTm cxt tm <*> mapM (forceTm cxt) args 
+forceTm cxt (RApp tm args) = RApp <$> forceTm cxt tm <*> mapM (forceTm cxt) args
 forceTm cxt tm = pure tm
 
 writeMeta :: Cxt s -> MetaVar -> MetaEntry -> ST s ()
-writeMeta cxt m e | trace ("writeMeta: " ++ show m ++ " " ++ show e) False = undefined
+--writeMeta cxt m e | trace ("writeMeta: " ++ show m ++ " " ++ show e) False = undefined
 writeMeta cxt m (Solved (TyMeta m')) | m == m' = error "can't solve meta with itself"
 writeMeta cxt m e = writeSTArray cxt.metas m (Just e)
 
-unify :: Cxt s -> Ty -> Ty -> Result s ()
-unify cxt l r = if l == r then pure () else do
+unify :: Cxt s -> Ty -> Ty -> Result s Ty
+unify cxt l r = if l == r then pure l else do
   _ <- trace ("unify (" ++ show l ++ ") (" ++ show r ++ ")") (pure ())
   if l == r then
-    pure ()
+    pure l
   else do
     l <- lift $ force cxt l
     r <- lift $ force cxt r
     unify' cxt l r
   where
   unify' cxt l r = case (l, r) of
-    (TyMeta m   , TyMeta m'    ) | m == m' -> pure ()
-    (TyMeta m   , TyMeta m'    )
-      | (m, m') <- (min m m', max m m') -> lift $ writeMeta cxt m' $ Solved (TyMeta m)
-    (TyMeta m   , ty          ) -> do occurs cxt m ty; lift $ writeMeta cxt m $ Solved ty
-    (ty        , TyMeta m     ) -> do occurs cxt m ty; lift $ writeMeta cxt m $ Solved ty
-    (TyArrow a b, TyArrow a' b') -> zipWithM (unify cxt) a a' *> unify cxt b b'
-    (TPair a b , TPair a' b' ) -> unify cxt a a' *> unify cxt b b'
-    (TList a   , TList a'    ) -> unify cxt a a'
-    (TMaybe a  , TMaybe a'   ) -> unify cxt a a'
-    (l         , r           ) -> if l == r
-      then pure ()
+    (TyMeta m         , TyMeta m'     ) | m == m' -> pure $ TyMeta m
+    (TyMeta m         , TyMeta m'     )
+      | (m, m') <- (min m m', max m m') -> lift (writeMeta cxt m' $ Solved (TyMeta m)) >> pure (TyMeta m)
+    (TyMeta m         , ty            ) -> do occurs cxt m ty; lift $ writeMeta cxt m $ Solved ty; pure ty
+    (ty               , TyMeta m      ) -> do occurs cxt m ty; lift $ writeMeta cxt m $ Solved ty; pure ty
+    (TyArrow a b      , TyArrow a' b' ) -> TyArrow <$> zipWithM (unify cxt) a a' <*> unify cxt b b'
+    (TPair a b        , TPair a' b'   ) -> TPair <$> unify cxt a a' <*> unify cxt b b'
+    (TList a          , TList a'      ) -> TList <$> unify cxt a a'
+    (TMaybe a         , TMaybe a'     ) -> TMaybe <$> unify cxt a a'
+    (TyPoly bds ty    , ty'           ) -> do
+      ty <- lift $ inst (enterLet cxt) bds ty
+      ty <- unify cxt ty ty'
+      lift $ gen cxt ty
+    (ty               , TyPoly bds ty') -> do
+      ty' <- lift $ inst (enterLet cxt) bds ty'
+      ty <- unify cxt ty ty'
+      lift $ gen cxt ty
+    (l                , r             ) -> if l == r
+      then pure l
       else except $ Left $ "failed to unify " ++ show l ++ " with " ++ show r
 
 
 type Result s = ExceptT String (ST s)
 
+inferPattern :: Cxt s -> Pattern -> Raw -> ST s (Ty, Ty)
+inferPattern cxt (PCons nm args) = do
+  undefined
+
+lookupCons :: Cxt s -> Name -> Result s ()
+lookupCons = undefined
+
 infer :: Cxt s -> Raw -> Result s (Raw, Ty)
-infer cxt raw | trace ("infer " ++ show raw) False = undefined
+-- infer cxt raw | trace ("infer " ++ show raw) False = undefined
 infer cxt (RApp t args) = do
   (tmArgs, tyArgs) <- mapAndUnzipM (infer cxt) args
   tyResult <- lift $ freshMeta cxt
@@ -321,7 +434,7 @@ infer cxt (RLetRec defs scope) = do
   cxt <- return $ enterLet cxt
   (tms, tys') <- mapAndUnzipM (infer cxt . snd) defs
   cxt <- return $ leaveLet cxt
-  foldlM (\acc -> (pure acc *>) . uncurry (unify cxt)) () (zip tys tys')
+  tys <- zipWithM (unify cxt) tys tys'
   defs <- lift $ mapM (\((nm, def), ty) -> (nm, def,) <$> gen cxt ty) (zip defs tys)
   cxt <- pure $ foldl (\cxt (nm, _, ty) -> bind cxt nm ty) cxt defs
   first (RLetRecTyped defs) <$> infer cxt scope
@@ -343,7 +456,8 @@ mkCxt = do
     metas,
     nextMeta,
     llvl = 1,
-    env = []
+    env = [],
+    globals = Globals { cons = M.empty, funs = M.empty, types = M.empty }
   }
 
 
