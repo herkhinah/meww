@@ -33,6 +33,11 @@ dependencies:
 - adjunctions
 - record-hasfield
 - text
+- mtl
+- filepath
+- ieee754
+- deepseq
+- unordered-containers
 
 default-extensions:
   - OverloadedRecordDot

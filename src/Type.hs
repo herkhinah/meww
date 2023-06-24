@@ -2,7 +2,8 @@
 {-# OPTIONS_GHC -Wno-name-shadowing #-}
 
 module Type(Ty(.., TPair, TList, TMaybe, TBool, TInt), TyBuiltin(..), Builtin(..)) where
-import Common (Name)
+
+type Name = String
 
 type TypeVar = Int
 type MetaVar = Int

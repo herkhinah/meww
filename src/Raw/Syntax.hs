@@ -1,82 +1,81 @@
 
 {-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE PolyKinds #-}
-{-# LANGUAGE TemplateHaskell #-}
-module Raw.Syntax(Fun(..), Raw(..), Pattern(..), Toplevel(..), Data(..)) where
+{-# OPTIONS_GHC -Wno-unused-matches #-}
+module Raw.Syntax where
 
-import Common (Name, Constant (..))
-import Type (Ty)
-
-
+import TT.Name
+import Raw.Parser.FC
 
 
+import Numeric.IEEE (IEEE(identicalIEEE))
 
---data Data = Data Name [Name] [RCons]
 
-data Data = Data Name [Int] [Ty] deriving (Show)
 
-data Fun = Fun Name [Name] Raw
+
+data SyntaxInfo = Syn {
+    syn_namespace           :: [String]
+  , inPattern               :: Bool
+  , syn_toplevel            :: Bool
+  , typeArrowAllowed    :: Bool
+  } deriving (Show)
+
+expandNS :: SyntaxInfo -> Name -> Name
+expandNS syn n@(NS _ _) = n
+expandNS syn n = case syn_namespace syn of
+                        [] -> n
+                        xs -> sNS n xs
+
+
+
+defaultSyntax :: SyntaxInfo
+defaultSyntax = Syn [] False True True
+
+
+data RecordInfo = RI {
+    record_parameters  :: [(Name,PType)]
+  , record_constructor :: Name
+  , record_projections :: [Name]
+  } deriving (Show)
+
+
+
+data Const = Str String | I Int | Fl Double | Ch Char | BI Integer
   deriving (Show)
 
-data Toplevel
-  = TopFun Fun
-  | TopData Data
-
-data PrimOp
-  = Plus
-  | Minus
-  | Mult
-  | Print
-  deriving (Show)
-
-data Pattern
-  = PCons Name [Pattern]
-  | PBind Name
-  | PHole
-
-data Raw
-  = RLam [Name] Raw
-  | RApp Raw [Raw]
-  | RCons Name [Raw]
-  | RLetRec [(Name, Raw)] Raw
-  | RLetRecTyped [(Name, Raw, Ty)] Raw
-  | RLet [(Name, Raw)] Raw
-  | RLetTyped [(Name, Raw, Ty)] Raw
-  | RVar Name
-  | RConst Constant
-  | RCase Raw [(Pattern, Raw)]
-  | RModule Name Raw
-  | RDefine Name Raw
-  | RDefineTyped Name Raw Ty
-  | RProvide Name
-  | RRequire Name
-  | RBlock [Raw]
-  | RBlockTyped [(Raw, Ty)]
+instance Eq Const where
+  I i       == I j       = i == j
+  Fl i      == Fl j      = identicalIEEE i j
+  Ch i      == Ch j      = i == j
+  Str i     == Str j     = i == j
+  _         == _         = False
 
 
+data PTerm = PBlock [PBlock]
+           | PApp FC PTerm [PTerm]
+           | PLam FC Name FC PType PTerm
+           | PCase FC PTerm [(PTerm, PTerm)]
+           | PConstant FC Const
+           | PPatvar FC Name
+           | PLet FC Name FC PTerm PType PTerm
+           | PTyped PTerm PType
+           | PVar FC Name  
+           | PAs FC Name PTerm
+           | PTrue FC
+           | PPair FC PTerm PTerm
+           deriving (Show)
 
-instance Show Raw where
-  show = pShow
+data PBlock = BlockExp FC PTerm
+            | BlockBind FC Name FC PTerm
+            deriving (Show)
 
-pShow :: Raw -> String
-pShow (RVar nm) = nm
-pShow (RApp rator args) = "(" ++ pShow rator ++ " " ++ unwords (map pShow args) ++ ")"
-pShow (RLet defs body) = "let (" ++ unwords (map (\(nm, def) -> "(" ++ nm ++ " " ++ pShow def ++ ")") defs) ++ pShow body ++ ")"
-pShow (RLetRec defs body) = "letrec (" ++ unwords (map (\(nm, def) -> "(" ++ nm ++ " " ++ pShow def ++ ")") defs) ++ pShow body ++ ")"
-pShow (RLetTyped defs body) = "let (" ++ unwords (map (\(nm, def, ty) -> "(" ++ nm ++ " : " ++ show ty ++ " " ++ pShow def ++ ")") defs) ++ pShow body ++ ")"
-pShow (RLetRecTyped defs body) = "letrec (" ++ unwords (map (\(nm, def, ty) -> "(" ++ nm ++ " : " ++ show ty ++ " " ++ pShow def ++ ")") defs) ++ pShow body ++ ")"
-pShow (RLam nms raw) = "(lam (" ++ unwords nms ++ ") " ++ pShow raw ++ ")"
-pShow (RConst lit) = show lit
-pShow (RCase _ _) = undefined
-pShow (RModule _ _) = undefined
-pShow (RRequire _) = undefined
-pShow (RProvide _) = undefined
-pShow (RDefine _ _) = undefined
-pShow (RDefineTyped _ _ _) = undefined
-pShow (RBlock _) = undefined
-pShow (RBlockTyped _) = undefined
-pShow (RCons _ _ ) = undefined
+data PType = PArrow FC [PType] PType
+           | PElided
+           | PPlaceholder
+           | PRef FC Name [PType]
+           | PTypevar FC Name
+           | PUnit FC
+           | PSigma FC PType PType
+           deriving (Show)
 
-instance Show Toplevel where
-  show (TopFun (Fun name args body)) = "(" ++ name ++ " (" ++ unwords args ++ ") " ++ show body ++ ")"
-  show (TopData (Data name args cons)) = "(" ++ name ++ " (" ++ unwords (map (\arg -> "'" ++ show arg) args)  ++ ") " ++ show cons ++ ")"
+

@@ -1,35 +1,25 @@
 {
   description = "my project description";
   inputs = {
-    nixpkgs.url = github:NixOS/nixpkgs/haskell-updates;
+    nixpkgs.url = github:NixOS/nixpkgs/nixos-unstable;
     flake-utils.url = "github:numtide/flake-utils";
-    hls-flake.url = "git+https://github.com/haskell/haskell-language-server";
-    bsb-http-chunked = {
-      url = "github:sjakobi/bsb-http-chunked";
-      flake = false;
-    };
-    weigh = {
-      url = "github:ysangkok/weigh/janus/import-unless";
-      flake = false;
-    };
   };
 
-  outputs = inputs@{
-    self,
-    nixpkgs,
-    flake-utils,
-    hls-flake,
-    ...
-  }:
-    flake-utils.lib.eachDefaultSystem (system: let
+  outputs =
+    inputs@{ self
+    , nixpkgs
+    , flake-utils
+    }:
+    flake-utils.lib.eachDefaultSystem (system:
+    let
       pkgs = import nixpkgs {
         inherit system;
-        config = {allowUnfree = true;};
+        config = { allowUnfree = true; };
       };
 
-      hls = hls-flake.packages."${system}".haskell-language-server-92;
+      hls = pkgs.haskell-language-server;
 
-      hPkgs = pkgs.haskell.packages.ghc92;
+      hPkgs = pkgs.haskellPackages;
 
       ghc-wrapped = hPkgs.ghcWithHoogle (hPkgs: with hPkgs; [
         megaparsec
@@ -41,12 +31,15 @@
         semigroupoids
         adjunctions
         record-hasfield
+        filepath
+        mtl-compat
+        ieee754
       ]);
 
-      stack-wrapped = pkgs.symlinkJoin {
+      stack-wrapped = with pkgs; symlinkJoin {
         name = "stack"; # will be available as the usual `stack` in terminal
-        paths = [ hPkgs.stack ];
-        buildInputs = [pkgs.makeWrapper];
+        paths = [ stack ];
+        buildInputs = [ makeWrapper ];
         postBuild = ''
           wrapProgram $out/bin/stack \
             --add-flags "\
@@ -57,30 +50,47 @@
         '';
       };
 
-      haskellDevEnv = [ ghc-wrapped stack-wrapped ] ++ (with hPkgs; [ cabal-install ]) ++ [ hls ];
 
-    in {
+
+      devEnv = [
+        ghc-wrapped
+        stack-wrapped
+        hls
+      ]
+      ++ (with pkgs; [
+        cabal-install
+        hpack
+        hlint
+        nixpkgs-fmt
+        ormolu
+        nil
+        rnix-lsp
+      ])
+      ++ (with hPkgs; [
+        fourmolu
+        implicit-hie
+      ]);
+
+      vscode = pkgs.vscode-with-extensions.override {
+        # vscode = pkgs.vscode-fhsWithPackages (ps: devEnv ++ [ ps.zlib ]);
+        vscodeExtensions = with pkgs.vscode-extensions;
+          [
+            haskell.haskell
+            justusadam.language-haskell
+            arrterian.nix-env-selector
+            jnoortheen.nix-ide
+            donjayamanne.githistory
+            eamodio.gitlens
+
+          ];
+      };
+
+    in
+    {
       devShells.default = pkgs.mkShell {
-        buildInputs = [pkgs.zlib];
+        buildInputs = with pkgs; [ zlib ];
 
-        nativeBuildInputs = with hPkgs; [
-          ghc-wrapped
-          stack-wrapped
-          cabal-install
-          fourmolu
-          implicit-hie
-          hpack
-          hlint
-          hls
-          (pkgs.vscode-with-extensions.override {
-            vscodeExtensions = with pkgs.vscode-extensions;
-              [
-                haskell.haskell
-                justusadam.language-haskell
-                mkhl.direnv
-              ];
-          })
-        ];
+        nativeBuildInputs = [ vscode ] ++ devEnv;
 
         withHoogle = true;
       };
